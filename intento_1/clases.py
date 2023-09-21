@@ -3,18 +3,14 @@ import random
 
 SIZE_TABLERO = 5
 FONDO_MAPA = "~"
+BARCO_MAPA = "B"
+HUNDIDO_MAPA = "H"
+DISPARO_MAPA = "*"
 
 class Coordenada:
     def __init__(self, x, y):
         self.x = x
         self.y = y
-
-class Jugador:
-    def __init__(self, nombre):
-        self.nombre = nombre
-    def realizarAccion(coordenada: Coordenada):
-        # TODO: void
-        pass
 
 class Barco:
     def __init__ (self, largo, estado, vertical):
@@ -124,13 +120,13 @@ class Tablero:
         # TODO: boolean -> true si se le dio a un barco, false si no
 
         # Si le dio al "mar" (fondo del mapa)
-        if self.casillas[coordenada.y][coordenada.x] == FONDO_MAPA:
-            self.casillas[coordenada.y][coordenada.x] = "*"
+        if self.casillas[coordenada.y][coordenada.x] == FONDO_MAPA: # "~"   
+            self.casillas[coordenada.y][coordenada.x] = DISPARO_MAPA # "*"
             return False
         
         # Si le dio a un barco:
-        if self.casillas[coordenada.y][coordenada.x] == "B":
-            self.casillas[coordenada.y][coordenada.x] = "H"
+        if self.casillas[coordenada.y][coordenada.x] == BARCO_MAPA: # "B"
+            self.casillas[coordenada.y][coordenada.x] = HUNDIDO_MAPA # "H"
             return True
         return False
 
@@ -157,18 +153,14 @@ class Servidor:
         return message, address
 
     def escuchar(self):
-        msgFromServer = "Hello UDP Client"
+        msgFromServer = ""
         bytesToSend = str.encode(msgFromServer)
 
         while (True):
             # Aceptar una nueva conexión
-            # message, address = self.recibirMSG()
-            bytesAddressPair = self.serverSocket.recvfrom(self.BUFFER_SIZE)
-            message = bytesAddressPair[0]
-            message = message.decode("utf-8")
-            address = bytesAddressPair[1]
-        
-            # NOMBRE= -> Agregar usuario
+            message, address = self.recibirMSG()
+
+            # (1): SIEMPRE VA ESTO NOMBRE= -> Agregar usuario
             if message.startswith("NOMBRE="):
                 self.validarUsuario(message, address)
                 print(self.usuarios)
@@ -185,131 +177,133 @@ class Servidor:
                 print(f"{self.usuarios[address]}: {message}")
                 self.serverSocket.sendto(bytesToSend, address)
 
-    def iniciarPartida(self, address):
+    def setUpTablerosMSG(self, address):
         # Creamos 1 tablero para un "bot" y 1 tablero para el jugador
         self.tablero = [self.iniciarTablero(), self.iniciarTablero()]
         tableroSTR = self.tablero[0].imprimirTableroString()
-        poniendo_barcos = True
         self.serverSocket.sendto(str.encode("Iniciando partida... Posiciona tus barcos diciendo\nTendras 3 barcos: 1x1, 2x1, 3x1 \nCOORDENADA=X,Y,V/H\n"+tableroSTR), address)
 
-        msgFromServer = "Hello UDP Client"
-        bytesToSend = str.encode(msgFromServer)
-        usuario_disconnect = False
-        finalMsg = ""
-        jugando = True
+
+    def iniciarPartida(self, address):
+        # ====== Iniciar Tableros ======
+        self.setUpTablerosMSG(address)
+
+        # ====== Estados del Juego ======
+        jugando = True; poniendo_barcos = True; usuario_disconnect = False
+        finalMSG = ""
+
+        # ====== Mientras esté Jugando ======
         while(jugando):
+            # ====== Si está poneiendo Barcos ======
+            # ====== ETAPA 1: PONER BARCOS ======
             if (poniendo_barcos):
                 print("Poniendo barcos")
+                # ====== Poner 3 Barcos: 1x1 ; 2x1; 3x1 ======
                 for i in range(3):
+                    # ====== BREAKPOINT: DISCONNECT ======
                     if usuario_disconnect:
                         break
 
                     print("Pon barco", i+1)
                     barco = Barco(i+1, True, False)
                     puesto = False
+
+                    # ====== Mientras no se haya puesto (bien) el barco ======
                     while not puesto:
-                        bytesAddressPair = self.serverSocket.recvfrom(self.BUFFER_SIZE)
-                        message = bytesAddressPair[0]
-                        message = message.decode("utf-8")
-                        address = bytesAddressPair[1]
+                        message, address = self.recibirMSG()
+                        # ====== BREAKPOINT: DISCONNECT ======
                         if (message.startswith("DESCONECTAR;")):
                             self.desconectarUsuario(message, address)
                             usuario_disconnect = True
                             print(self.usuarios)
                             break
-
+                        
+                        # ====== Si el mensaje es válido ======
                         if (message.startswith("COORDENADA=")):
                             try:
-                                coordenada = message.split("=")[1]
-                                coordenada = coordenada.split(",")
-                                x = coordenada[0]
-                                y = coordenada[1]
-                                vertical = coordenada[2]
-                                vertical = vertical == "V"
+                                # ====== Leer COORDS ======
+                                coordenada = message.split("=")[1]; coordenada = coordenada.split(",")
+                                barco.vertical = coordenada[2] == "V"
                                 
-                                barco.vertical = vertical
-                                print(f"Barco {i+1}, x: {x}, y: {y}, vertical: {vertical}")
-                                puesto = self.tablero[0].colocarBarco(barco, Coordenada(int(x), int(y)))
+                                # ====== Intentar Colocar Barco ======
+                                print(f"Barco {i+1}, x: {coordenada[0]}, y: {coordenada[1]}, vertical: {coordenada[2]}")
+                                puesto = self.tablero[0].colocarBarco(barco, Coordenada(int(coordenada[0]), int(coordenada[1])))
+
+                                # ====== Si se pudo colocar ======
                                 if puesto:
-                                    tableroSTR = self.tablero[0].imprimirTableroString()
-                                    print(tableroSTR)
-                                    msgFromServer = tableroSTR+"\n\nBarco colocado con éxito."
-                                    # Colocamos también el barco en el tablero del bot
+                                    # ====== Mensaje de respuesta ======
+                                    msgFromServer = self.tablero[0].imprimirTableroString()+"\n\nBarco colocado con éxito."
+                                    
+                                    # ====== Colocar barco del bot ======
                                     barcoBOTpuesto = False
                                     while not barcoBOTpuesto:
-                                        xBOT = random.randint(0, SIZE_TABLERO-1)
-                                        yBOT = random.randint(0, SIZE_TABLERO-1)
-                                        verticalBOT = random.choice([True, False])
-                                        barcoBOT = Barco(i+1, True, verticalBOT)
-                                        barcoBOTpuesto = self.tablero[1].colocarBarco(barcoBOT, Coordenada(int(xBOT), int(yBOT)))
+                                        barcoBOT = Barco(i+1, True, random.choice([True, False]))
+                                        barcoBOTpuesto = self.tablero[1].colocarBarco(barcoBOT, Coordenada(random.randint(0, SIZE_TABLERO-1), random.randint(0, SIZE_TABLERO-1)))
+                                    
                                     print("Barco bot puesto", i+1)
-                                    self.tablero[1].imprimirTablero()
+                                    # ====== Imprimir tableros (SERVER y CLIENTE) ======
+                                    self.tablero[0].imprimirTablero(); self.tablero[1].imprimirTablero()
                                     self.serverSocket.sendto(str.encode(msgFromServer), address)
                                 else:
+                                    # ====== Debe volver a intentar ======
                                     self.serverSocket.sendto(str.encode("False;Barco no se pudo colocar."), address)
                             except:
+                                # ====== Debe volver a intentar (error inesperado o en el formato) ======
                                 self.serverSocket.sendto(str.encode("False;Barco no se pudo colocar. Tu mensaje no fue valido, debe ser: COORDENADA=X,Y,V/H"), address)
+                        # ====== Mensaje no inicia con COORDENADA= ======
                         else:
                             self.serverSocket.sendto(str.encode("False;Barco no se pudo colocar. Tu mensaje no fue valido"), address)
-                            
+                
                 poniendo_barcos = False
+
+                # ====== ETAPA 2: ATACAR ======
+                # ====== BREAKPOINT: DISCONNECT ======
                 if usuario_disconnect:
                     break
-                # Ataque
-                print("Atacando")
-                bytesAddressPair = self.serverSocket.recvfrom(self.BUFFER_SIZE)
-                message = bytesAddressPair[0]
-                message = message.decode("utf-8")
-                address = bytesAddressPair[1]
+                print("Atacando!")
+
+                # ====== Escuchar al usuario ======
+                message, address = self.recibirMSG()
                 self.serverSocket.sendto(str.encode("Ahora tienes que atacar"), address)
                 while jugando:
-                    bytesAddressPair = self.serverSocket.recvfrom(self.BUFFER_SIZE)
-                    message = bytesAddressPair[0]
-                    message = message.decode("utf-8")
-                    address = bytesAddressPair[1]
+                    message, address = self.recibirMSG()
 
+                    # ====== BREAKPOINT: DISCONNECT ======
                     if (message.startswith("DESCONECTAR;")):
                         self.desconectarUsuario(message, address)
                         usuario_disconnect = True
                         print(self.usuarios)
                         break
-
+                    
+                    # ====== Si el mensaje es válido ======
                     if (message.startswith("COORDENADA=")):
                         try:
-                            coordenada = message.split("=")[1]
-                            coordenada = coordenada.split(",")
-                            x = coordenada[0]
-                            y = coordenada[1]
-                            self.tablero[1].realizarAtaque(Coordenada(int(x), int(y)))
+                            # ====== Ataque del usuario ======
+                            coordenada = message.split("=")[1]; coordenada = coordenada.split(",")
+                            self.tablero[1].realizarAtaque(Coordenada(int(coordenada[0]), int(coordenada[1])))
 
-                            # Ataque del bot
-                            xBOT = random.randint(0, SIZE_TABLERO-1); yBOT = random.randint(0, SIZE_TABLERO-1)
-                            self.tablero[0].realizarAtaque(Coordenada(int(xBOT), int(yBOT)))
+                            # ====== Ataque del bot ======
+                            self.tablero[0].realizarAtaque(Coordenada(random.randint(0, SIZE_TABLERO-1), random.randint(0, SIZE_TABLERO-1)))
 
-                            tableroSTRUsuario = self.tablero[0].imprimirTableroStringOculto()                            
-                            tableroSTRBot = self.tablero[1].imprimirTableroStringOculto()
+                            # ====== Mensaje de respuesta ======
+                            tableroSTRUsuario = self.tablero[0].imprimirTableroStringOculto(); tableroSTRBot = self.tablero[1].imprimirTableroStringOculto()
                             msgFromServer = "Tu\n"+tableroSTRUsuario+"\nBot\n"+tableroSTRBot
 
-                            # Verificamos si el usuario ganó
-                            # TODO: Verificar si el usuario ganó
-                            # Actualiza el estado de "salud" de los barcos del bot
+                            # ====== Verificamos si el usuario ganó ======
                             for barco in self.tablero[1].barcos:
-                                self.tablero[1].revisarBarco(barco)
+                                self.tablero[1].revisarBarco(barco) # Actualiza el estado del barco
                             
                             if self.tablero[1].revisarBarcos():
-                                finalMsg = "GANASTE!!!!\n"+tableroSTRUsuario+"\nBot\n"+tableroSTRBot
                                 jugando = False
+                                finalMSG = "\n"+tableroSTRUsuario+"\nBot\n"+tableroSTRBot+"\nGANASTE!!!!\nGANASTE!!!!\nGANASTE!!!!"
                                 break
-
-
-                            # Verificamos si el bot ganó
-                            # TODO: Verificar si el bot ganó
-                            # Actualiza el estado de "salud" de los barcos del usuario
+                            
+                            # ====== Verificamos si el bot ganó ======
                             for barco in self.tablero[0].barcos:
-                                self.tablero[0].revisarBarco(barco)
+                                self.tablero[0].revisarBarco(barco) # Actualiza el estado del barco
                             
                             if self.tablero[0].revisarBarcos():
-                                finalMsg = "Perdiste\n"+tableroSTRUsuario+"\nBot\n"+tableroSTRBot
+                                finalMSG = "Perdiste\n"+tableroSTRUsuario+"\nBot\n"+tableroSTRBot
                                 jugando = False
                                 break
 
@@ -320,13 +314,12 @@ class Servidor:
                     else:
                         self.serverSocket.sendto(str.encode("False;Ataque no valido, debe ser: COORDENADA=X,Y"), address)
                 print("Terminó la partida")
-                # Reset tablero
             break
         
         if usuario_disconnect:
             return
         # Terminó la partida
-        self.serverSocket.sendto(str.encode(finalMsg), address)
+        self.serverSocket.sendto(str.encode(finalMSG), address)
     
     def iniciarTablero(self):
         casillas = [ [FONDO_MAPA for i in range(SIZE_TABLERO)] for j in range(SIZE_TABLERO) ]
@@ -386,19 +379,28 @@ class Cliente:
         self.nombre = nombre
         self.servidor = servidor
         self.clientSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
-
-    def conectarAServidor(self):
-        while(True):
-            enviarMensaje = input("Ingrese su mensaje: ")
-            self.enviarMensaje(enviarMensaje)
-        pass
-
+    
+    # ====== Funciones ======
+    def enviarMensajePrefix(self, mensaje, prefix=""):
+        bytesToSend = str.encode(mensaje)
+        self.clientSocket.sendto(bytesToSend, (self.servidor.SERVER_IP, self.servidor.PORT))
+        msgFromServer = self.clientSocket.recvfrom(self.servidor.BUFFER_SIZE)
+        msg = "{}{}".format(prefix, msgFromServer[0].decode("utf-8"))
+        return msg
+    
     def listarComandos(self):
         print("HELP; -> Lista los comandos disponibles")
         print("DESCONECTAR; -> Desconecta al usuario del servidor")
         print("JUGAR; -> Inicia el juego")
         pass
 
+
+    def conectarAServidor(self):
+        while(True):
+            enviarMensaje = input("Ingrese su mensaje: ")
+            self.enviarMensaje(enviarMensaje)
+
+    # ====== Función Principal ======
     def enviarMensaje(self, mensaje):
         if mensaje.startswith("HELP;"):
             self.listarComandos()
@@ -407,36 +409,27 @@ class Cliente:
             self.desconectar()
             return
         
-        bytesToSend = str.encode(mensaje)
-        self.clientSocket.sendto(bytesToSend, (self.servidor.SERVER_IP, self.servidor.PORT))
-        msgFromServer = self.clientSocket.recvfrom(self.servidor.BUFFER_SIZE)
-        msg = "{}".format(msgFromServer[0].decode("utf-8"))
+        # ====== Enviar mensaje al servidor ======
+        msg = self.enviarMensajePrefix(mensaje)
         print(msg)
         pass
-
+    
     def enviarMensajeInicio(self, mensaje):
-        bytesToSend = str.encode(mensaje)
-        self.clientSocket.sendto(bytesToSend, (self.servidor.SERVER_IP, self.servidor.PORT))
-        msgFromServer = self.clientSocket.recvfrom(self.servidor.BUFFER_SIZE)
-        msg = "{}".format(msgFromServer[0].decode("utf-8"))
-
+        # ====== Enviar mensaje de inicio ====== (NOMBRE=)
+        msg = self.enviarMensajePrefix(mensaje)
         msg = msg.split(";")
 
-        # Mensaje
+        # ====== Si no se pudo agregar el usuario RETORNA BOOLEAN ======
         print(msg[1])
-
-        # Boolean handler
         boolean = msg[0] in ["True", "true", "TRUE"]
         return boolean
     
     def desconectar(self):
-        bytesToSend = str.encode("DESCONECTAR;")
-        self.clientSocket.sendto(bytesToSend, (self.servidor.SERVER_IP, self.servidor.PORT))
-        msgFromServer = self.clientSocket.recvfrom(self.servidor.BUFFER_SIZE)
-        msg = "SERVER DICE: {}".format(msgFromServer[0].decode("utf-8"))
+        # ====== Enviar mensaje de desconexión ======
+        msg = self.enviarMensajePrefix("DESCONECTAR;", "SERVER DICE: ")
         print(msg)
-        self.clientSocket.close()
-        exit(0)
+        # ====== Cerramos el socket ======
+        self.clientSocket.close(); exit(0)
 
     def jugarTurno(self):
         # TODO: void
