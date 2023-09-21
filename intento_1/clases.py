@@ -23,14 +23,6 @@ class Barco:
         self.vertical = vertical # true = vertical, false = horizontal
         self.coordenada = []
 
-    def recibirAtaque(self, coordenada: Coordenada):
-        # TODO: void
-        pass
-    def hundir(self):
-        # TODO: void
-        pass
-
-
 class Tablero:
     def __init__(self, casillas):
         self.casillas = casillas
@@ -76,6 +68,24 @@ class Tablero:
                 print(self.casillas[fila][columna], end="\t")
             print()
 
+    def revisarBarco(self, barco: Barco):
+        # Revisamos integridad del barco
+        # True: sigue con vida, False: hundido
+        for coordenada in barco.coordenada:
+            if self.casillas[coordenada.y][coordenada.x] == "B": # El barco tiene una coordenada que no ha sido atacada
+                barco.estado = True
+                return 
+        barco.estado = False
+        return 
+    
+    def revisarBarcos(self):
+        for barco in self.barcos:
+            if barco.estado: # Si hay un barco vivo, no se ha ganado
+                return False
+        return True
+
+
+    
     def colocarBarco(self, barco: Barco, coordenada: Coordenada):
         # TODO: boolean -> true si se pudo colocar, false si no
         # Validamos que no se salga del tablero
@@ -138,6 +148,13 @@ class Servidor:
         self.serverSocket.bind((self.SERVER_IP, self.PORT))
         print("UDP server up and listening")
         pass
+    
+    def recibirMSG(self):
+        bytesAddressPair = self.serverSocket.recvfrom(self.BUFFER_SIZE)
+        message = bytesAddressPair[0]
+        message = message.decode("utf-8")
+        address = bytesAddressPair[1]
+        return message, address
 
     def escuchar(self):
         msgFromServer = "Hello UDP Client"
@@ -145,6 +162,7 @@ class Servidor:
 
         while (True):
             # Aceptar una nueva conexión
+            # message, address = self.recibirMSG()
             bytesAddressPair = self.serverSocket.recvfrom(self.BUFFER_SIZE)
             message = bytesAddressPair[0]
             message = message.decode("utf-8")
@@ -177,8 +195,9 @@ class Servidor:
         msgFromServer = "Hello UDP Client"
         bytesToSend = str.encode(msgFromServer)
         usuario_disconnect = False
+        finalMsg = ""
         jugando = True
-        while(True):
+        while(jugando):
             if (poniendo_barcos):
                 print("Poniendo barcos")
                 for i in range(3):
@@ -218,12 +237,12 @@ class Servidor:
                                     # Colocamos también el barco en el tablero del bot
                                     barcoBOTpuesto = False
                                     while not barcoBOTpuesto:
-                                        xBOT = random.randint(0, SIZE_TABLERO)
-                                        yBOT = random.randint(0, SIZE_TABLERO)
+                                        xBOT = random.randint(0, SIZE_TABLERO-1)
+                                        yBOT = random.randint(0, SIZE_TABLERO-1)
                                         verticalBOT = random.choice([True, False])
                                         barcoBOT = Barco(i+1, True, verticalBOT)
                                         barcoBOTpuesto = self.tablero[1].colocarBarco(barcoBOT, Coordenada(int(xBOT), int(yBOT)))
-                                    print("Barco bot puesto", i)
+                                    print("Barco bot puesto", i+1)
                                     self.tablero[1].imprimirTablero()
                                     self.serverSocket.sendto(str.encode(msgFromServer), address)
                                 else:
@@ -234,7 +253,14 @@ class Servidor:
                             self.serverSocket.sendto(str.encode("False;Barco no se pudo colocar. Tu mensaje no fue valido"), address)
                             
                 poniendo_barcos = False
-
+                if usuario_disconnect:
+                    break
+                # Ataque
+                print("Atacando")
+                bytesAddressPair = self.serverSocket.recvfrom(self.BUFFER_SIZE)
+                message = bytesAddressPair[0]
+                message = message.decode("utf-8")
+                address = bytesAddressPair[1]
                 self.serverSocket.sendto(str.encode("Ahora tienes que atacar"), address)
                 while jugando:
                     bytesAddressPair = self.serverSocket.recvfrom(self.BUFFER_SIZE)
@@ -257,7 +283,7 @@ class Servidor:
                             self.tablero[1].realizarAtaque(Coordenada(int(x), int(y)))
 
                             # Ataque del bot
-                            xBOT = random.randint(0, SIZE_TABLERO); yBOT = random.randint(0, SIZE_TABLERO)
+                            xBOT = random.randint(0, SIZE_TABLERO-1); yBOT = random.randint(0, SIZE_TABLERO-1)
                             self.tablero[0].realizarAtaque(Coordenada(int(xBOT), int(yBOT)))
 
                             tableroSTRUsuario = self.tablero[0].imprimirTableroStringOculto()                            
@@ -266,23 +292,41 @@ class Servidor:
 
                             # Verificamos si el usuario ganó
                             # TODO: Verificar si el usuario ganó
+                            # Actualiza el estado de "salud" de los barcos del bot
+                            for barco in self.tablero[1].barcos:
+                                self.tablero[1].revisarBarco(barco)
+                            
+                            if self.tablero[1].revisarBarcos():
+                                finalMsg = "GANASTE!!!!\n"+tableroSTRUsuario+"\nBot\n"+tableroSTRBot
+                                jugando = False
+                                break
+
 
                             # Verificamos si el bot ganó
                             # TODO: Verificar si el bot ganó
+                            # Actualiza el estado de "salud" de los barcos del usuario
+                            for barco in self.tablero[0].barcos:
+                                self.tablero[0].revisarBarco(barco)
+                            
+                            if self.tablero[0].revisarBarcos():
+                                finalMsg = "Perdiste\n"+tableroSTRUsuario+"\nBot\n"+tableroSTRBot
+                                jugando = False
+                                break
 
+                            print("Ataque exitoso (bot y usuario)")
                             self.serverSocket.sendto(str.encode(msgFromServer), address)
                         except:
-                            self.serverSocket.sendto(str.encode("False;Ataque no valido, debe ser: COORDENADA=X,Y"), address)
+                            self.serverSocket.sendto(str.encode("False;EXCEPT;Ataque no valido, debe ser: COORDENADA=X,Y"), address)
                     else:
                         self.serverSocket.sendto(str.encode("False;Ataque no valido, debe ser: COORDENADA=X,Y"), address)
-
-
-            # Atacando
-            try:
-                print(f"{self.usuarios[address]}: {message}")
-            except:
-                break
-            pass
+                print("Terminó la partida")
+                # Reset tablero
+            break
+        
+        if usuario_disconnect:
+            return
+        # Terminó la partida
+        self.serverSocket.sendto(str.encode(finalMsg), address)
     
     def iniciarTablero(self):
         casillas = [ [FONDO_MAPA for i in range(SIZE_TABLERO)] for j in range(SIZE_TABLERO) ]
@@ -404,66 +448,3 @@ def __main__():
 if __name__ == "__main__":
     __main__()
     
-
-# class Coordenada:
-#     def __init__(self, x, y):
-#         self.x = x
-#         self.y = y
-
-# class Jugador:
-#     def __init__(self, nombre):
-#         self.nombre = nombre
-#     def realizarAccion(coordenada: Coordenada):
-#         # TODO: void
-#         pass
-
-# class Barco:
-#     def __init__ (self, tipo, estado):
-#         self.tipo = tipo
-#         self.estado = estado
-#     def recibirAtaque(self, coordenada: Coordenada):
-#         # TODO: void
-#         pass
-#     def hundir(self):
-#         # TODO: void
-#         pass
-
-# class Tablero:
-#     def __init__(self, casillas):
-#         self.casillas = casillas
-#     def colocarBarco(self, barco: Barco, coordenada: Coordenada):
-#         # TODO: boolean -> true si se pudo colocar, false si no
-#         pass
-#     def realizarAtaque(self, coordenada: Coordenada):
-#         # TODO: boolean -> true si se le dio a un barco, false si no
-#         pass
-
-# class Servidor:
-#     def __init__(self, jugadoresConectados):
-#         self.jugadoresConectados = [Jugador]
-#     def iniciarPartida(self):
-#         # TODO: void
-#         pass
-#     def finalizarPartida(self):
-#         # TODO: void
-#         pass 
-
-# class Cliente:
-#     def __init__ (self, nombre, servidor: Servidor):
-#         self.nombre = nombre
-#         self.servidor = servidor
-#     def conectarAServidor(servidor: Servidor):
-#         # TODO: void
-#         pass
-#     def desconectar(self):
-#         # TODO: void
-#         pass
-#     def jugarTurno(self):
-#         # TODO: void
-#         pass
-
-# def __main__():
-#     pass
-
-# if __name__ == "__main__":
-#     __main__()
