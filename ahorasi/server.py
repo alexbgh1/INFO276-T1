@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from clases import Servidor, Cliente
+from clases import Servidor
 
 # Load environment variables
 load_dotenv()
@@ -12,9 +12,5 @@ BUFFER_SIZE = int(os.getenv("BUFFER_SIZE"))
 
 # =========== MAIN ===========
 servidor = Servidor(SERVER_IP, PORT, BUFFER_SIZE)
-cliente = Cliente(servidor)
-
-print("Escribe 'HELP;' para ver los comandos disponibles")
-cliente.conectarAServidor()
-
-print("Conexión finalizada. Saliendo...")
+servidor.bind()
+servidor.escuchar()
