@@ -18,6 +18,7 @@ class Response:
     
     def toJSON(self):
         return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True)
+# Ships: {p: [x, y, orientation], b: [x, y, orientation], s: [x, y, orientation]}
 
 class Bot:
     def __init__(self, ships, progress, lives):
@@ -66,10 +67,9 @@ class Servidor:
 
             # === ACTION ===
             response = self.handleMessageJSON(messageJSON, address)
-            try:
+            if (address in self.usuarios):
                 self.usuarios[address].printUsuario()
-            except:
-                pass
+            print("\nUsuarios activos: ", self.usuarios)
 
 
             # === SEND RESPONSE ===
@@ -77,15 +77,27 @@ class Servidor:
 
     def handleMessageJSON(self, messageJSON: dict, address: tuple):
         # MessageStructure: action, bot, ships, position.
+        if (address in self.usuarios): # Validamos que el usuario exista y que la acción sea válida
+            validActions = validateProgress(self.usuarios[address].progress)
+            if (messageJSON["action"] not in validActions):
+                print("Acción inválida.")
+                return Response(messageJSON["action"], 0, [])
+
         # CONNECCTION
         if (messageJSON["action"] == "c"): # Actual Progress: 1
             return self.handleConnection(messageJSON, address)
         if (messageJSON["action"] == "s"): # Actual Progress: 2
             return self.handleSelect(messageJSON, address)
+        if (messageJSON["action"] == "b"): # Actual Progress: 3
+            return self.handleBuild(messageJSON, address)
         if (messageJSON["action"] == "d"):
             return self.handleDisconnection(messageJSON, address)
         return Response(messageJSON["action"], 1, [])
         
+    def handleBuild(self, messageJSON: dict, address: tuple):
+        # {p: [x, y, orientation], b: [x, y, orientation], s: [x, y, orientation]}
+        return Response(messageJSON["action"], 1, [])
+
     def handleSelect(self, messageJSON: dict, address: tuple):
         try:
             if (messageJSON["bot"] == 1):
@@ -99,9 +111,12 @@ class Servidor:
                 self.usuarios[address].progress = 2
                 return Response(messageJSON["action"], 1, [])
         except:
-            self.usuarios[address].progress = 1
+            try:
+                self.usuarios[address].progress = 1
+            except:
+                Response(messageJSON["action"], 0, [])
             return Response(messageJSON["action"], 0, [])
-      
+        
     def handleConnection(self, messageJSON: dict, address: tuple):
         # Hay menos de 2 jugadores
         if (len(self.usuarios) < 2):
@@ -146,7 +161,7 @@ class Cliente:
         while(True):
             isValid = False
             while (not isValid):
-                action = (input("Ingrese la acción que desea realizar: (c/a/l/b/d/s) ")).lower()
+                action = (input(f"Progress:{self.progress}/5 \nIngrese la acción que desea realizar: (c/a/l/b/d/s)")).lower()
                 while (action not in VALID_ACTION):
                     action = input("Ingrese la acción que desea realizar:  ")
                 isValid = self.handleAction(action)
@@ -184,37 +199,30 @@ class Cliente:
         if (msgFromServer["action"] == "d"):
             self.clientSocket.close()
             return True
+        
         if (msgFromServer["action"] == "c"): # Paso: 1
             if (msgFromServer["status"]):
                 print("Conexión exitosa.")
                 return False
             else:
-                print("El servidor está lleno.")
-                return True
+                print("El servidor está lleno o hubo un error.")
+                return False
+            
         if (msgFromServer["action"] == "s"): # Paso: 2
             if (msgFromServer["status"]):
                 print("Mensaje recibido correctamente.")
                 return False
             else:
-                print("Bot no se pudo seleccionar.")
+                print("Bot no se pudo seleccionar o hubo un error.") # Retrocede un paso
                 self.progress = 1
         return False
     
-    def validateProgress(self):
-        if (self.progress == 0):
-            print("Acciones que puede realizar: c")
-            return ["c"]
-        elif (self.progress == 1):
-            print("Acciones que puede realizar: s, d")
-            return ["s", "d"]
-        elif (self.progress == 2):
-            print("Acciones que puede realizar: b, d")
-            return ["b", "d"]
-        return []
+
 
     def handleAction(self, action: str):
         # MessageStructure: action, bot, ships, position
-        validActions = self.validateProgress()
+        # True: Continue, False: Repeat
+        validActions = validateProgress(self.progress)
         if (action not in validActions):
             print("Acción inválida.")
             return False
@@ -262,6 +270,18 @@ class Cliente:
         self.sendMessage(self.messageToSend.toJSON())
         self.clientSocket.close()
         pass
+
+def validateProgress(progress):
+    if (progress == 0):
+        print("Acciones que puede realizar: c")
+        return ["c"]
+    elif (progress == 1):
+        print("Acciones que puede realizar: s, d")
+        return ["s", "d"]
+    elif (progress == 2):
+        print("Acciones que puede realizar: b, d")
+        return ["b", "d"]
+    return []
 
 def getCoord(inputCoord: str):
     inputValue = input(f"Ingrese la coordenada {inputCoord}: ")
