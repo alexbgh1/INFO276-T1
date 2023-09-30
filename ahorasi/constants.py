@@ -3,3 +3,10 @@ FONDO_MAPA = "~"
 BARCO_MAPA = "B"
 HUNDIDO_MAPA = "H"
 DISPARO_MAPA = "*"
+
+SHIPS = ["p","b","s"]
+SHIPS_SIZE = {
+    "p": 1,
+    "b": 2,
+    "s": 3,
+}

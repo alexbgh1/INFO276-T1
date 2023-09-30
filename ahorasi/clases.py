@@ -1,14 +1,9 @@
 import socket
 import json
+import random
 # importar constantes desde constants.py
 from constants import *
 
-class Barco:
-    def __init__ (self, largo, estado, vertical):
-        self.largo = largo
-        self.estado = estado # true = vivo, false = hundido
-        self.vertical = vertical # true = vertical, false = horizontal
-        self.coordenada = []
 
 class Response:
     def __init__(self, action, status, position: []):
@@ -21,23 +16,36 @@ class Response:
 # Ships: {p: [x, y, orientation], b: [x, y, orientation], s: [x, y, orientation]}
 
 class Bot:
-    def __init__(self, ships, progress, lives):
-        self.ships = ships
-        self.progress = progress
-        self.lives = lives
+    def __init__(self):
+        self.ships = self.randomShips()
+        self.lives = 6
+        self.shipsAsCoords = []
+
+    def randomShips(self):
+        # {p: [x, y, orientation], b: [x, y, orientation], s: [x, y, orientation]} # 1x1, 2x1, 3x1
+        ships = {"p": [], "b": [], "s": []}
+        for ship in SHIPS:
+            validShip = False
+            while (not validShip):
+                x = random.randint(0,SIZE_TABLERO-1); y = random.randint(0,SIZE_TABLERO-1); orientation = random.randint(0,1)
+                validShip = validateOrientation(x, y, orientation, SHIPS_SIZE[ship]) and validateOverlap(x, y, orientation, SHIPS_SIZE[ship], ships)
+            ships[ship] = [x,y,orientation]
+        return ships
 
 class Usuario:
-    def __init__(self, bot, ships, progress):
+    def __init__(self, bot, ships, shipsAsCoords, progress):
         self.bot = bot
         self.againstBot = False
         self.ships = ships
+        self.shipsAsCoords = shipsAsCoords
         self.progress = progress
 
     def printUsuario(self):
         print("Bot: ", self.bot)
         print("AgainstBot: ", self.againstBot)
         print("Ships: ", self.ships)
-        print("Progress: ", self.progress)
+        print("Ships As Coords: ", self.shipsAsCoords)
+
 
 class Servidor:
     def __init__(self, SERVER_IP, PORT, BUFFER_SIZE):
@@ -64,6 +72,7 @@ class Servidor:
         while (True):
             # Aceptar una nueva conexión
             message, address = self.recibirMSG(); messageJSON = json.loads(message);
+            print(message)
 
             # === ACTION ===
             response = self.handleMessageJSON(messageJSON, address)
@@ -79,6 +88,7 @@ class Servidor:
         # MessageStructure: action, bot, ships, position.
         if (address in self.usuarios): # Validamos que el usuario exista y que la acción sea válida
             validActions = validateProgress(self.usuarios[address].progress)
+            print("Acciones recibidas: ", messageJSON["action"])
             if (messageJSON["action"] not in validActions):
                 print("Acción inválida.")
                 return Response(messageJSON["action"], 0, [])
@@ -90,18 +100,38 @@ class Servidor:
             return self.handleSelect(messageJSON, address)
         if (messageJSON["action"] == "b"): # Actual Progress: 3
             return self.handleBuild(messageJSON, address)
+        if (messageJSON["action"] == "a"):
+            return self.handleAttack(messageJSON, address)
         if (messageJSON["action"] == "d"):
             return self.handleDisconnection(messageJSON, address)
         return Response(messageJSON["action"], 1, [])
-        
+    
+    def handleAttack(self, messageJSON: dict, address: tuple):
+        # Si está en progress == 3 · Ataque
+        return Response(messageJSON["action"], 1, [])
+
+
     def handleBuild(self, messageJSON: dict, address: tuple):
         # {p: [x, y, orientation], b: [x, y, orientation], s: [x, y, orientation]}
+        try:
+            self.usuarios[address].ships = messageJSON["ships"]
+            self.usuarios[address].shipsAsCoords = shipsToCoords(self.usuarios[address].ships)
+            self.usuarios[address].progress = 3
+            return Response(messageJSON["action"], 1, [])
+        except:
+            try:
+                self.usuarios[address].progress = 2
+            except:
+                Response(messageJSON["action"], 0, [])
+            Response(messageJSON["action"], 0, [])
         return Response(messageJSON["action"], 1, [])
 
     def handleSelect(self, messageJSON: dict, address: tuple):
         try:
             if (messageJSON["bot"] == 1):
-                self.usuarios[address].bot = Bot({}, 0, 6)
+                bot = Bot()
+                bot.shipsAsCoords = shipsToCoords(bot.ships)
+                self.usuarios[address].bot = Bot()
                 self.usuarios[address].againstBot = True
                 self.usuarios[address].progress = 2
                 return Response(messageJSON["action"], 1, [])
@@ -120,7 +150,7 @@ class Servidor:
     def handleConnection(self, messageJSON: dict, address: tuple):
         # Hay menos de 2 jugadores
         if (len(self.usuarios) < 2):
-            self.usuarios[address] = Usuario({}, {}, 1) # Usuario: {bot: {}, ships: {}, progress: 1}
+            self.usuarios[address] = Usuario({}, {}, [] , 1) # Usuario: {bot: {}, ships: {}, progress: 1}
             return Response(messageJSON["action"], 1, [])
         # Hay 2 jugadores o más
         else:
@@ -154,6 +184,8 @@ class Cliente:
         self.messageToSend = {} # MessageStructure
         self.lives = 6
         self.progress = 0
+        self.ships = {"p": [] , "b": [], "s": []}
+        self.shipsAsCoords = []
     
     def conectarAServidor(self):
         VALID_ACTION = ["c", "a", "l", "b", "d", "s"]
@@ -161,7 +193,7 @@ class Cliente:
         while(True):
             isValid = False
             while (not isValid):
-                action = (input(f"Progress:{self.progress}/5 \nIngrese la acción que desea realizar: (c/a/l/b/d/s)")).lower()
+                action = (input(f"\nProgress:{self.progress}/5 \nIngrese la acción que desea realizar: (c/a/l/b/d/s)")).lower()
                 while (action not in VALID_ACTION):
                     action = input("Ingrese la acción que desea realizar:  ")
                 isValid = self.handleAction(action)
@@ -200,7 +232,7 @@ class Cliente:
             self.clientSocket.close()
             return True
         
-        if (msgFromServer["action"] == "c"): # Paso: 1
+        if (msgFromServer["action"] == "c"): # Paso: 1 Conectarse
             if (msgFromServer["status"]):
                 print("Conexión exitosa.")
                 return False
@@ -208,13 +240,22 @@ class Cliente:
                 print("El servidor está lleno o hubo un error.")
                 return False
             
-        if (msgFromServer["action"] == "s"): # Paso: 2
+        if (msgFromServer["action"] == "s"): # Paso: 2 Seleccionar
             if (msgFromServer["status"]):
-                print("Mensaje recibido correctamente.")
+                # print("Mensaje recibido correctamente.")
                 return False
             else:
                 print("Bot no se pudo seleccionar o hubo un error.") # Retrocede un paso
                 self.progress = 1
+        
+        if (msgFromServer["action"] == "b"): # Paso: 3 Construir
+            if (msgFromServer["status"]):
+                # print("Mensaje recibido correctamente.")
+                return False
+            else:
+                print("Barco no se pudo construir o hubo un error.") # Retrocede un paso
+                self.progress = 2
+
         return False
     
 
@@ -241,9 +282,25 @@ class Cliente:
         
         # BUILD
         elif (action == "b"):
-            inputShip = getShip(); x = getCoord("x"); y = getCoord("y")
-            inputOrientation = getOrientation()
-            self.messageToSend = MessageStructure(action, 0, {inputShip: [x, y, inputOrientation]}, [])
+            shipsDict = {"p": {} , "b": {}, "s": {}}
+            for ship in ["p", "b", "s"]:
+                isValidShip = False
+                while (not isValidShip):
+                    shipSize = SHIPS_SIZE[ship]
+                    print(f"Construyendo {ship} {shipSize}x1")
+                    x = getCoord("x"); y = getCoord("y"); inputOrientation = getOrientation()
+                    # First validation: inside board
+                    valid_orientation = validateOrientation(x, y, inputOrientation, shipSize)
+                    # Second validation: overlapping
+                    valid_overlap = validateOverlap(x, y, inputOrientation, shipSize, self.ships)
+                    isValidShip = valid_orientation and valid_overlap
+
+                shipsDict[ship] = [x, y, inputOrientation]
+                self.ships[ship] = [x,y,inputOrientation]
+
+            self.progress = 3
+            self.shipsAsCoords = shipsToCoords(self.ships)
+            self.messageToSend = MessageStructure(action, 0, shipsDict, [])
             return True
         
         # SELECT # BOT or NO BOT
@@ -252,7 +309,7 @@ class Cliente:
             while (inputBot != "y" and inputBot != "n"):
                 inputBot = input("¿Desea jugar contra un bot? (y/n): ").lower()
             self.progress = 2
-            if (inputBot == "y"):   
+            if (inputBot == "y"):
                 self.messageToSend = MessageStructure(action, 1, {}, [])
             else:
                 self.messageToSend = MessageStructure(action, 0, {}, [])
@@ -271,6 +328,22 @@ class Cliente:
         self.clientSocket.close()
         pass
 
+def validateOverlap(x, y, orientation, shipSize, selfShips):
+    # Examples of selfShips: {"p": [0,0,0] : "b": [] : "s": []} ; # [x,y,orientation]
+    # Examples of selfShips: {"p": [0,0,0] : "b": [1,1,0] : "s": []}
+    # Examples of selfShips: {"p": [0,0,0] : "b": [1,1,0] : "s": [2,2,1]}
+    # Possible ship
+    currentCoords = shipXYOToCoords(x,y,orientation,shipSize) # [(x,y),(x1,x2)...]
+    for ship in SHIPS:
+        shipInformation = selfShips[ship]
+        if ((shipInformation == []) or (shipSize == SHIPS_SIZE[ship])):
+            pass
+        else: 
+            newCoords = shipXYOToCoords(shipInformation[0],shipInformation[1], shipInformation[2], SHIPS_SIZE[ship])
+            if (overlapped(currentCoords, newCoords)):
+                return False
+    return True
+
 def validateProgress(progress):
     if (progress == 0):
         print("Acciones que puede realizar: c")
@@ -281,19 +354,45 @@ def validateProgress(progress):
     elif (progress == 2):
         print("Acciones que puede realizar: b, d")
         return ["b", "d"]
+    elif (progress == 3):
+        print("Acciones que puede realizar: a, d")
+        return ["a", "d"]
     return []
 
+def overlapped(list_coords_1, list_coords_2):
+    for punto1 in list_coords_1:
+        for punto2 in list_coords_2:
+            if punto1 == punto2:
+                return True
+    return False
+
+def shipXYOToCoords(x,y,o,shipSize):
+    # [3,0,0,1] -> [(0,0), (1,0), (2,0)]
+    coords = []
+    if (o == 0): # vertical
+        for alongY in range(shipSize):
+            coords.append((x,y+alongY))
+    else:
+        for alongX in range(shipSize):
+            coords.append((x+alongX, y))
+    return coords
+
+def validateOrientation(x, y, orientation, shipSize):
+    if (orientation == 0): # Vertical
+        if (y + (shipSize-1) >= SIZE_TABLERO): # Out of board (vertical) # ex: y = 4, shipSize = 2, SIZE_TABLERO = 0,1,2,3,4
+            print("Barco fuera del tablero en vertical.")
+            return False
+    else: # Horizontal
+        if (x + (shipSize-1) >= SIZE_TABLERO): # Out of board (horizontal), ex: x = 4, shipSize = 2, SIZE_TABLERO = 0,1,2,3,4 
+            print("Barco fuera del tablero en horizontal.")
+            return False
+    return True
+        
 def getCoord(inputCoord: str):
     inputValue = input(f"Ingrese la coordenada {inputCoord}: ")
-    while (inputValue.isnumeric() == False or int(inputValue) < 0 or int(inputValue) > SIZE_TABLERO):
-        inputValue = input(f"Ingrese la coordenada {inputCoord} (Debe ser un número entre 0 y {SIZE_TABLERO}) : ")
+    while (inputValue.isnumeric() == False or int(inputValue) < 0 or int(inputValue) >= SIZE_TABLERO):
+        inputValue = input(f"Ingrese la coordenada {inputCoord} (Debe ser un número entre 0 y {SIZE_TABLERO-1}) : ")
     return int(inputValue)
-
-def getShip():
-    inputShip = input("¿Qué barco desea construir? (p/b/s)\np: Patito(1x1)\nb: Buque(2x1)\ns: Submarino(3x1)\n").lower()
-    while (inputShip != "p" and inputShip != "b" and inputShip != "s"):
-        inputShip = input("¿Qué barco desea construir? (p/b/s): ").lower()
-    return inputShip
 
 def getOrientation():
     inputOrientation = input("¿Qué orientación desea? (v/h): ").lower()
@@ -302,6 +401,16 @@ def getOrientation():
     if (inputOrientation == "v"):
         return 0
     return 1
+
+def shipsToCoords(ships):
+    # {p: [x, y, orientation], b: [x, y, orientation], s: [x, y, orientation]} # 1x1, 2x1, 3x1
+    shipsCoords = []
+    for ship in SHIPS:
+        shipInfo = ships[ship]
+        shipCoords = shipXYOToCoords(shipInfo[0], shipInfo[1], shipInfo[2], SHIPS_SIZE[ship] )
+        for shipCoord in shipCoords:
+            shipsCoords.append(shipCoord)
+    return shipsCoords
 
 def __main__():
     pass
