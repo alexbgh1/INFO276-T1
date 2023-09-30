@@ -13,6 +13,8 @@ BUFFER_SIZE = int(os.getenv("BUFFER_SIZE"))
 # =========== MAIN ===========
 servidor = Servidor(SERVER_IP, PORT, BUFFER_SIZE)
 cliente = Cliente(servidor)
+
 cliente.conectarAServidor()
+
 
 print("Conexión finalizada. Saliendo...")

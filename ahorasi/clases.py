@@ -3,17 +3,6 @@ import json
 # importar constantes desde constants.py
 from constants import *
 
-SIZE_TABLERO = 5
-FONDO_MAPA = "~"
-BARCO_MAPA = "B"
-HUNDIDO_MAPA = "H"
-DISPARO_MAPA = "*"
-
-class Coordenada:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-
 class Barco:
     def __init__ (self, largo, estado, vertical):
         self.largo = largo
@@ -21,6 +10,33 @@ class Barco:
         self.vertical = vertical # true = vertical, false = horizontal
         self.coordenada = []
 
+class Response:
+    def __init__(self, action, status, position: []):
+        self.action = action
+        self.status = status # 0 = false, 1 = true
+        self.position = position
+    
+    def toJSON(self):
+        return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True)
+
+class Bot:
+    def __init__(self, ships, progress, lives):
+        self.ships = ships
+        self.progress = progress
+        self.lives = lives
+
+class Usuario:
+    def __init__(self, bot, ships, progress):
+        self.bot = bot
+        self.againstBot = False
+        self.ships = ships
+        self.progress = progress
+
+    def printUsuario(self):
+        print("Bot: ", self.bot)
+        print("AgainstBot: ", self.againstBot)
+        print("Ships: ", self.ships)
+        print("Progress: ", self.progress)
 
 class Servidor:
     def __init__(self, SERVER_IP, PORT, BUFFER_SIZE):
@@ -28,8 +44,8 @@ class Servidor:
         self.PORT = PORT
         self.BUFFER_SIZE = BUFFER_SIZE
         self.serverSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
-        self.usuarios = {}
         self.tablero = []
+        self.usuarios = {}
 
     def bind(self):
         self.serverSocket.bind((self.SERVER_IP, self.PORT))
@@ -44,16 +60,67 @@ class Servidor:
         return message, address
 
     def escuchar(self):
-        msgFromServer = ""
-        bytesToSend = str.encode(msgFromServer)
-
         while (True):
             # Aceptar una nueva conexión
-            message, address = self.recibirMSG()
-            print(f"Mensaje recibido: {message}")
+            message, address = self.recibirMSG(); messageJSON = json.loads(message);
 
-            self.serverSocket.sendto(str.encode(message), address)
+            # === ACTION ===
+            response = self.handleMessageJSON(messageJSON, address)
+            try:
+                self.usuarios[address].printUsuario()
+            except:
+                pass
 
+
+            # === SEND RESPONSE ===
+            self.serverSocket.sendto(str.encode(response.toJSON()), address)
+
+    def handleMessageJSON(self, messageJSON: dict, address: tuple):
+        # MessageStructure: action, bot, ships, position.
+        # CONNECCTION
+        if (messageJSON["action"] == "c"): # Actual Progress: 1
+            return self.handleConnection(messageJSON, address)
+        if (messageJSON["action"] == "s"): # Actual Progress: 2
+            return self.handleSelect(messageJSON, address)
+        if (messageJSON["action"] == "d"):
+            return self.handleDisconnection(messageJSON, address)
+        return Response(messageJSON["action"], 1, [])
+        
+    def handleSelect(self, messageJSON: dict, address: tuple):
+        try:
+            if (messageJSON["bot"] == 1):
+                self.usuarios[address].bot = Bot({}, 0, 6)
+                self.usuarios[address].againstBot = True
+                self.usuarios[address].progress = 2
+                return Response(messageJSON["action"], 1, [])
+            else:
+                self.usuarios[address].bot = {}
+                self.usuarios[address].againstBot = False
+                self.usuarios[address].progress = 2
+                return Response(messageJSON["action"], 1, [])
+        except:
+            self.usuarios[address].progress = 1
+            return Response(messageJSON["action"], 0, [])
+      
+    def handleConnection(self, messageJSON: dict, address: tuple):
+        # Hay menos de 2 jugadores
+        if (len(self.usuarios) < 2):
+            self.usuarios[address] = Usuario({}, {}, 1) # Usuario: {bot: {}, ships: {}, progress: 1}
+            return Response(messageJSON["action"], 1, [])
+        # Hay 2 jugadores o más
+        else:
+            return Response(messageJSON["action"], 0, [])
+        
+    def handleDisconnection(self, messageJSON: dict, address: tuple):
+        # Si el usuario existe
+        if (address in self.usuarios):
+            del self.usuarios[address]
+            return Response(messageJSON["action"], 1, [])
+        # Si el usuario no existe
+        else:
+            return Response(messageJSON["action"], 0, [])
+
+# ===========================================================================
 
 class MessageStructure:
     def __init__(self, action: str, bot: int, ships: dict, position: []):
@@ -71,66 +138,129 @@ class Cliente:
         self.clientSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
         self.messageToSend = {} # MessageStructure
         self.lives = 6
+        self.progress = 0
     
     def conectarAServidor(self):
         VALID_ACTION = ["c", "a", "l", "b", "d", "s"]
+        print("\nc: Conectar\na: Atacar\nl: Perder\nb: Construir\nd: Desconectar\ns: Seleccionar\n")
         while(True):
-            action = (input("Ingrese la acción que desea realizar:\nc: Conectar\na: Atacar\nl: Perder\nb: Construir\nd: Desconectar\ns: Seleccionar\n")).lower()
-            while (action not in VALID_ACTION):
-                action = input("Ingrese la acción que desea realizar:  ")
-            self.handleAction(action)
+            isValid = False
+            while (not isValid):
+                action = (input("Ingrese la acción que desea realizar: (c/a/l/b/d/s) ")).lower()
+                while (action not in VALID_ACTION):
+                    action = input("Ingrese la acción que desea realizar:  ")
+                isValid = self.handleAction(action)
 
+            # Enviar mensaje
             self.sendMessage(self.messageToSend.toJSON())
+
+            # Recibir mensaje
+            msgFromServer = self.receiveMessage()
+            # Manejar mensaje
+            shouldEnd = self.handleMessageFromServer(msgFromServer)
+
             # Desconectar
-            if (action == "d" or action):
+            if (action == "d" or shouldEnd):
                 break
             
 
     # ====== Función Principal ======
+    def receiveMessage(self):
+        msgFromServer = self.clientSocket.recvfrom(self.servidor.BUFFER_SIZE)
+        msgFromServer = msgFromServer[0].decode('utf-8')
+        print(msgFromServer)
+        return msgFromServer
+
     def sendMessage(self, mensaje):
         bytesToSend = str.encode(mensaje)
         self.clientSocket.sendto(bytesToSend, (self.servidor.SERVER_IP, self.servidor.PORT))
-        msgFromServer = self.clientSocket.recvfrom(self.servidor.BUFFER_SIZE)
-        msg = f"{msgFromServer[0].decode('utf-8')}"
-        print(msg)
-        return msg
+        pass
     
+    def handleMessageFromServer(self, message: str):
+        # message: action, status, x, y
+        # True : Repeat
+        # False: Continue
+        msgFromServer = json.loads(message)
+        if (msgFromServer["action"] == "d"):
+            self.clientSocket.close()
+            return True
+        if (msgFromServer["action"] == "c"): # Paso: 1
+            if (msgFromServer["status"]):
+                print("Conexión exitosa.")
+                return False
+            else:
+                print("El servidor está lleno.")
+                return True
+        if (msgFromServer["action"] == "s"): # Paso: 2
+            if (msgFromServer["status"]):
+                print("Mensaje recibido correctamente.")
+                return False
+            else:
+                print("Bot no se pudo seleccionar.")
+                self.progress = 1
+        return False
+    
+    def validateProgress(self):
+        if (self.progress == 0):
+            print("Acciones que puede realizar: c")
+            return ["c"]
+        elif (self.progress == 1):
+            print("Acciones que puede realizar: s, d")
+            return ["s", "d"]
+        elif (self.progress == 2):
+            print("Acciones que puede realizar: b, d")
+            return ["b", "d"]
+        return []
+
     def handleAction(self, action: str):
         # MessageStructure: action, bot, ships, position
+        validActions = self.validateProgress()
+        if (action not in validActions):
+            print("Acción inválida.")
+            return False
+
         # CONNECCTION
         if (action == "c"):
-            inputBot = input("¿Desea jugar contra un bot? (y/n): ").lower()
-            while (inputBot != "y" and inputBot != "n"):
-                inputBot = input("¿Desea jugar contra un bot? (y/n): ").lower()
-            if (inputBot == "y"):   
-                self.messageToSend = MessageStructure(action, 1, {}, [])
-            else:
-                self.messageToSend = MessageStructure(action, 0, {}, [])
-            return
+            self.progress = 1
+            self.messageToSend = MessageStructure(action, 0, {}, [])
+            return True
         
         # ATTACK
         elif (action == "a"):
             x = getCoord("x"); y = getCoord("y")
             self.messageToSend = MessageStructure(action, 0, {}, [x, y])
-            return
+            return True
         
         # BUILD
         elif (action == "b"):
-            inputShip =getShip(); x = getCoord("x"); y = getCoord("y")
+            inputShip = getShip(); x = getCoord("x"); y = getCoord("y")
             inputOrientation = getOrientation()
             self.messageToSend = MessageStructure(action, 0, {inputShip: [x, y, inputOrientation]}, [])
-            return
+            return True
         
-        # SELECT # // ???
+        # SELECT # BOT or NO BOT
         elif (action == "s"):
-            self.messageToSend = MessageStructure(action, 0, {}, [])
-            return
+            inputBot = input("¿Desea jugar contra un bot? (y/n): ").lower()
+            while (inputBot != "y" and inputBot != "n"):
+                inputBot = input("¿Desea jugar contra un bot? (y/n): ").lower()
+            self.progress = 2
+            if (inputBot == "y"):   
+                self.messageToSend = MessageStructure(action, 1, {}, [])
+            else:
+                self.messageToSend = MessageStructure(action, 0, {}, [])
+            return True
 
         # DISCONNECT or LOSE
         elif (action == "d" or action == "l"):
             self.messageToSend = MessageStructure(action, 0, {}, [])
-            return
+            return True
 
+        pass
+    
+    def disconnect(self):
+        self.messageToSend = MessageStructure("d", 0, {}, [])
+        self.sendMessage(self.messageToSend.toJSON())
+        self.clientSocket.close()
         pass
 
 def getCoord(inputCoord: str):
