@@ -94,26 +94,59 @@ class Servidor:
                 return Response(messageJSON["action"], 0, [])
 
         # CONNECCTION
-        if (messageJSON["action"] == "c"): # Actual Progress: 1
-            return self.handleConnection(messageJSON, address)
-        if (messageJSON["action"] == "s"): # Actual Progress: 2
-            return self.handleSelect(messageJSON, address)
-        if (messageJSON["action"] == "b"): # Actual Progress: 3
-            return self.handleBuild(messageJSON, address)
-        if (messageJSON["action"] == "a"):
-            return self.handleAttack(messageJSON, address)
+        if (messageJSON["action"] == "c"): # Actual Progress: 0
+            return self.handleConnection(messageJSON, address) # 1
+        if (messageJSON["action"] == "s"): # Actual Progress: 1
+            return self.handleSelect(messageJSON, address) # 2
+        if (messageJSON["action"] == "b"): # Actual Progress: 2
+            return self.handleBuild(messageJSON, address) # 2
+        if (messageJSON["action"] == "a"): # Actual Progress: 3
+            return self.handleAttack(messageJSON, address) # 3
         if (messageJSON["action"] == "d"):
             return self.handleDisconnection(messageJSON, address)
         return Response(messageJSON["action"], 1, [])
     
     def handleAttack(self, messageJSON: dict, address: tuple):
-        # Si está en progress == 3 · Ataque
-        return Response(messageJSON["action"], 1, [])
+        # {x, y}
+        # invalid Attack (out of board)
+        # In this case a valid response means that the attack hit a ship
+        # A invalid response means that the attack missed
+        AttackCoords = (messageJSON["position"][0], messageJSON["position"][1])
+        # Out of the board
+        if (AttackCoords[0] < 0 or AttackCoords[0] >= SIZE_TABLERO or AttackCoords[1] < 0 or AttackCoords[1] >= SIZE_TABLERO):
+            return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]])
+        # Player is against bot
+        # if (self.usuarios[address].againstBot):
+        #     # Attack hit
+        #     if (AttackCoords in self.usuarios[address].bot.shipsAsCoords):
+        #         self.usuarios[address].bot.lives -= 1
+        #         self.usuarios[address].bot.shipsAsCoords.remove(AttackCoords)
+        #         if (self.usuarios[address].bot.lives == 0):
+        #             self.usuarios[address].progress = 4
+        #             return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]])
+        #         else:
+        #             return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]])
+        #     # Attack missed
+        #     else:
+        #         return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]])
+            
+        return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]])
 
 
     def handleBuild(self, messageJSON: dict, address: tuple):
         # {p: [x, y, orientation], b: [x, y, orientation], s: [x, y, orientation]}
         try:
+            # Check if ships are valid
+            for ship in SHIPS:
+                shipInfo = messageJSON["ships"][ship]
+                validShip = validateOrientation(shipInfo[0], shipInfo[1], shipInfo[2], SHIPS_SIZE[ship]) and validateOverlap(shipInfo[0], shipInfo[1], shipInfo[2], SHIPS_SIZE[ship], self.usuarios[address].ships)
+                if (not validShip):
+                    print("Barco inválido. Overlap u orientación inválida.")
+                    self.usuarios[address].ships = {"p": [], "b": [], "s": []}
+                    raise Exception("Barco inválido.")
+                self.usuarios[address].ships[ship] = shipInfo
+                
+            # Ships are valid
             self.usuarios[address].ships = messageJSON["ships"]
             self.usuarios[address].shipsAsCoords = shipsToCoords(self.usuarios[address].ships)
             self.usuarios[address].progress = 3
@@ -122,9 +155,8 @@ class Servidor:
             try:
                 self.usuarios[address].progress = 2
             except:
-                Response(messageJSON["action"], 0, [])
-            Response(messageJSON["action"], 0, [])
-        return Response(messageJSON["action"], 1, [])
+                return Response(messageJSON["action"], 0, [])
+            return Response(messageJSON["action"], 0, [])
 
     def handleSelect(self, messageJSON: dict, address: tuple):
         try:
@@ -150,7 +182,7 @@ class Servidor:
     def handleConnection(self, messageJSON: dict, address: tuple):
         # Hay menos de 2 jugadores
         if (len(self.usuarios) < 2):
-            self.usuarios[address] = Usuario({}, {}, [] , 1) # Usuario: {bot: {}, ships: {}, progress: 1}
+            self.usuarios[address] = Usuario({}, {"p":[],"b":[],"s":[]}, [] , 1) # Usuario: {bot: {}, ships: {}, progress: 1}
             return Response(messageJSON["action"], 1, [])
         # Hay 2 jugadores o más
         else:
@@ -283,7 +315,7 @@ class Cliente:
         # BUILD
         elif (action == "b"):
             shipsDict = {"p": {} , "b": {}, "s": {}}
-            for ship in ["p", "b", "s"]:
+            for ship in SHIPS:
                 isValidShip = False
                 while (not isValidShip):
                     shipSize = SHIPS_SIZE[ship]
@@ -319,7 +351,6 @@ class Cliente:
         elif (action == "d" or action == "l"):
             self.messageToSend = MessageStructure(action, 0, {}, [])
             return True
-
         pass
     
     def disconnect(self):
