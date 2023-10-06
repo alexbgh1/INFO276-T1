@@ -31,6 +31,9 @@ class Bot:
                 validShip = validateOrientation(x, y, orientation, SHIPS_SIZE[ship]) and validateOverlap(x, y, orientation, SHIPS_SIZE[ship], ships)
             ships[ship] = [x,y,orientation]
         return ships
+    
+    def printShips(self):
+        print("Ships as Coords: ", self.shipsAsCoords)
 
 class Usuario:
     def __init__(self, bot, ships, shipsAsCoords, progress):
@@ -39,6 +42,7 @@ class Usuario:
         self.ships = ships
         self.shipsAsCoords = shipsAsCoords
         self.progress = progress
+        self.lives = 6
 
     def printUsuario(self):
         print("Bot: ", self.bot)
@@ -78,6 +82,8 @@ class Servidor:
             response = self.handleMessageJSON(messageJSON, address)
             if (address in self.usuarios):
                 self.usuarios[address].printUsuario()
+                if (self.usuarios[address].againstBot):
+                    self.usuarios[address].bot.printShips()
             print("\nUsuarios activos: ", self.usuarios)
 
 
@@ -116,19 +122,30 @@ class Servidor:
         if (AttackCoords[0] < 0 or AttackCoords[0] >= SIZE_TABLERO or AttackCoords[1] < 0 or AttackCoords[1] >= SIZE_TABLERO):
             return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]])
         # Player is against bot
-        # if (self.usuarios[address].againstBot):
-        #     # Attack hit
-        #     if (AttackCoords in self.usuarios[address].bot.shipsAsCoords):
-        #         self.usuarios[address].bot.lives -= 1
-        #         self.usuarios[address].bot.shipsAsCoords.remove(AttackCoords)
-        #         if (self.usuarios[address].bot.lives == 0):
-        #             self.usuarios[address].progress = 4
-        #             return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]])
-        #         else:
-        #             return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]])
-        #     # Attack missed
-        #     else:
-        #         return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]])
+        if (self.usuarios[address].againstBot):
+            # Simulation Bot Attack
+            botAttackCoords = (random.randint(0,SIZE_TABLERO-1), random.randint(0,SIZE_TABLERO-1))
+            if (botAttackCoords in self.usuarios[address].shipsAsCoords):
+                self.usuarios[address].lives -= 1
+                self.usuarios[address].shipsAsCoords.remove(botAttackCoords)
+                if (self.usuarios[address].lives == 0):
+                    self.usuarios[address].progress = 1 # conectado
+                    return Response(messageJSON["action"], 1, [-1, -1])
+                else:
+                    return Response(messageJSON["action"], 1, [botAttackCoords[0], botAttackCoords[1]])
+
+            # Attack hit
+            if (AttackCoords in self.usuarios[address].bot.shipsAsCoords):
+                self.usuarios[address].bot.lives -= 1
+                self.usuarios[address].bot.shipsAsCoords.remove(AttackCoords)
+                if (self.usuarios[address].bot.lives == 0):
+                    self.usuarios[address].progress = 0
+                    return Response(messageJSON["action"], 1, [-1, -1])
+                else:
+                    return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]])
+            # Attack missed
+            else:
+                return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]])
             
         return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]])
 
@@ -163,7 +180,7 @@ class Servidor:
             if (messageJSON["bot"] == 1):
                 bot = Bot()
                 bot.shipsAsCoords = shipsToCoords(bot.ships)
-                self.usuarios[address].bot = Bot()
+                self.usuarios[address].bot = bot
                 self.usuarios[address].againstBot = True
                 self.usuarios[address].progress = 2
                 return Response(messageJSON["action"], 1, [])
