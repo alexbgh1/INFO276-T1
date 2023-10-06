@@ -1,0 +1,6 @@
+{
+    "action": "c, a, l, b, d, s", # Accion recibida, confirmando
+    "status": , # [0: False, 1: True] si la accion del cliente es correcta o no
+    "x": , # utlimas coordenadas jugadas x un usuario
+    "y": 
+  }
