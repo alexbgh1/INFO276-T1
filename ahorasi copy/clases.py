@@ -6,10 +6,11 @@ from constants import *
 
 
 class Response:
-    def __init__(self, action, status, position: []):
+    def __init__(self, action, status, position: [], extra=""):
         self.action = action
         self.status = status # 0 = false, 1 = true
         self.position = position
+        self.extra = extra
     
     def toJSON(self):
         return json.dumps(self, default=lambda o: o.__dict__, sort_keys=True)
@@ -45,6 +46,7 @@ class Usuario:
         self.lives = 6
 
     def printUsuario(self):
+        print("Lives: ", self.lives)
         print("Bot: ", self.bot)
         print("AgainstBot: ", self.againstBot)
         print("Ships: ", self.ships)
@@ -59,8 +61,6 @@ class Servidor:
         self.serverSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
         self.tableros = {} # {address: tablero}
         self.usuarios = {}
-        self.turno_actual = None  # Inicialmente, no hay un turno asignado
-
 
     def bind(self):
         self.serverSocket.bind((self.SERVER_IP, self.PORT))
@@ -87,19 +87,6 @@ class Servidor:
                 if (self.usuarios[address].againstBot):
                     self.usuarios[address].bot.printShips()
             print("\nUsuarios activos: ", self.usuarios)
-
-            # # === Cambiar el turno ===
-            # if self.turno_actual is None:
-            #     # Asignar el turno al primer jugador que se conecte
-            #     self.turno_actual = address
-            # else:
-            #     clientes = list(self.usuarios.keys())
-            #     if len(clientes) >= 2:
-            #         # Cambiar el turno al otro jugador (o bot)
-            #         self.turno_actual = [addr for addr in clientes if addr != self.turno_actual][0]
-
-            # # === Enviar información sobre el turno a los clientes ===
-            # self.enviar_turno_a_clientes()
 
             # === SEND RESPONSE ===
             self.serverSocket.sendto(str.encode(response.toJSON()), address)
@@ -140,7 +127,7 @@ class Servidor:
         AttackCoords = (messageJSON["position"][0], messageJSON["position"][1])
         # Out of the board
         if (AttackCoords[0] < 0 or AttackCoords[0] >= SIZE_TABLERO or AttackCoords[1] < 0 or AttackCoords[1] >= SIZE_TABLERO):
-            return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]])
+            return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]], "Tiro fuera del tablero.")
         # Player is against bot
         if (self.usuarios[address].againstBot):
             # Simulation Bot Attack
@@ -148,24 +135,29 @@ class Servidor:
             if (botAttackCoords in self.usuarios[address].shipsAsCoords):
                 self.usuarios[address].lives -= 1
                 self.usuarios[address].shipsAsCoords.remove(botAttackCoords)
+                # ========= BOT WIN =========
                 if (self.usuarios[address].lives == 0):
                     self.usuarios[address].progress = 1 # CONECTADO
-                    return Response(messageJSON["action"], 1, [-1, -1])
+                    # Reset lives: 
+                    self.usuarios[address].lives = 6
+                    return Response("l", 1, [botAttackCoords[0], botAttackCoords[1]], "Perdiste contra el bot") # Lose
                 else:
-                    return Response(messageJSON["action"], 1, [botAttackCoords[0], botAttackCoords[1]])
+                    pass
+                    # return Response(messageJSON["action"], 1, [botAttackCoords[0], botAttackCoords[1]])
 
             # Attack hit
             if (AttackCoords in self.usuarios[address].bot.shipsAsCoords):
                 self.usuarios[address].bot.lives -= 1
                 self.usuarios[address].bot.shipsAsCoords.remove(AttackCoords)
+                # ========= USER WIN =========
                 if (self.usuarios[address].bot.lives == 0):
-                    self.usuarios[address].progress = 0
-                    return Response(messageJSON["action"], 1, [-1, -1])
+                    self.usuarios[address].progress = 1 # CONECTADO
+                    return Response("w", 1, [AttackCoords[0], AttackCoords[1]], "Ganaste contra el bot") # Win
                 else:
-                    return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]])
+                    return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]], "Le diste al bot")
             # Attack missed
             else:
-                return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]])
+                return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]], " No le diste al bot")
             
         # Player is against player
         else:
@@ -173,23 +165,43 @@ class Servidor:
             playerAddresses = list(self.usuarios.keys())
             # If there is only one player, return invalid attack
             if (len(self.tableros) < 2):
-                return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]])
+                user = Usuario({}, {"p":[],"b":[],"s":[]}, [] , 1) # Usuario: {bot: {}, ships: {}, progress: 1}
+                user.lives = 6; user.ships = {"p": [], "b": [], "s": []}; user.shipsAsCoords = [];
+                self.usuarios[address] = user
+                return Response("w", 1, [AttackCoords[0], AttackCoords[1]], "Ganaste,No hay suficientes jugadores.")
+                # return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]], "No hay suficientes jugadores.")
             
             enemyAddress = [addr for addr in playerAddresses if addr != address][0]
-            print("Enemy Address: ", enemyAddress)
             if (AttackCoords in self.tableros[enemyAddress]):
                 print("Attack hit")
                 self.usuarios[enemyAddress].lives -= 1
                 self.usuarios[enemyAddress].shipsAsCoords.remove(AttackCoords)
                 self.tableros[enemyAddress].remove(AttackCoords)
+                if (self.usuarios[address].lives == 0):
+                    user = Usuario({}, {"p":[],"b":[],"s":[]}, [] , 1) # Usuario: {bot: {}, ships: {}, progress: 1}
+                    user.lives = 6; user.ships = {"p": [], "b": [], "s": []}; user.shipsAsCoords = [];
+                    self.usuarios[address] = user
+                    return Response("l", 1, [AttackCoords[0], AttackCoords[1]]) # Lose
+
                 if (self.usuarios[enemyAddress].lives == 0):
-                    self.usuarios[address].progress = 1 # CONECTADO
-                    return Response(messageJSON["action"], 1, [-1, -1])
+                    self.tableros[address] = []
+                    user = Usuario({}, {"p":[],"b":[],"s":[]}, [] , 1) # Usuario: {bot: {}, ships: {}, progress: 1}
+                    user.lives = 6; user.ships = {"p": [], "b": [], "s": []}; user.shipsAsCoords = [];
+                    self.usuarios[address] = user
+
+                    return Response("w", 1, [AttackCoords[0], AttackCoords[1]], "Ganaste") # Win
+                # HIT
                 else:
-                    return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]])
+                    return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]], "Le diste al jugador")
             # Attack missed
             else:
-                return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]])
+                if (self.usuarios[address].lives == 0):
+                    user = Usuario({}, {"p":[],"b":[],"s":[]}, [] , 1) # Usuario: {bot: {}, ships: {}, progress: 1}
+                    user.lives = 6; user.ships = {"p": [], "b": [], "s": []}; user.shipsAsCoords = [];
+                    self.usuarios[address] = user
+                    return Response("l", 1, [AttackCoords[0], AttackCoords[1]], "Perdiste") # Lose
+                
+                return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]], "No le diste al jugador")
 
 
 
@@ -257,7 +269,10 @@ class Servidor:
         # Si el usuario existe
         if (address in self.usuarios):
             if (not self.usuarios[address].againstBot):
-                del self.tableros[address]
+                try:
+                    del self.tableros[address]
+                except:
+                    pass
             del self.usuarios[address]
             return Response(messageJSON["action"], 1, [])
         # Si el usuario no existe
@@ -284,6 +299,7 @@ class Cliente:
         self.lives = 6
         self.progress = 0
         self.ships = {"p": [] , "b": [], "s": []}
+        self.attacks = []
         self.shipsAsCoords = []
     
     def conectarAServidor(self):
@@ -292,7 +308,7 @@ class Cliente:
         while(True):
             isValid = False
             while (not isValid):
-                action = (input(f"\nProgress:{self.progress}/5 \nIngrese la acción que desea realizar: (c/a/l/b/d/s)")).lower()
+                action = (input(f"\nProgress:{self.progress}/3 \nIngrese la acción que desea realizar: \n")).lower()
                 while (action not in VALID_ACTION):
                     action = input("Ingrese la acción que desea realizar:  ")
                 isValid = self.handleAction(action)
@@ -337,7 +353,7 @@ class Cliente:
                 return False
             else:
                 print("El servidor está lleno o hubo un error.")
-                return False
+                return True
             
         if (msgFromServer["action"] == "s"): # Paso: 2 Seleccionar
             if (msgFromServer["status"]):
@@ -354,10 +370,35 @@ class Cliente:
             else:
                 print("Barco no se pudo construir o hubo un error.") # Retrocede un paso
                 self.progress = 2
+        if (msgFromServer["action"] == "a"):
+            if (msgFromServer["status"]):
+                print("Ataque exitoso.")
+            else:
+                print("Ataque fallido.")
+            self.attacks.append((msgFromServer["position"][0], msgFromServer["position"][1], msgFromServer["status"]))
+            printBoard(self.attacks)
+            return False
+        
+        if (msgFromServer["action"] == "w"):
+            print("Ganaste!!!")
+            print("Ganaste!!!")
+            print("Ganaste!!!")
+            self.resetStats()
+        
+        if (msgFromServer["action"] == "l"):
+            print("Perdiste!!!")
+            print("Perdiste!!!")
+            print("Perdiste!!!")
+            self.resetStats()
 
         return False
     
-
+    def resetStats(self):
+        self.attacks = []
+        self.ships = {"p": [] , "b": [], "s": []}
+        self.shipsAsCoords = []
+        self.lives = 6
+        self.progress = 1
 
     def handleAction(self, action: str):
         # MessageStructure: action, bot, ships, position
@@ -509,6 +550,25 @@ def shipsToCoords(ships):
         for shipCoord in shipCoords:
             shipsCoords.append(shipCoord)
     return shipsCoords
+
+def printBoard(attacks):
+    # atacks: [(x,y, status), (x,y, status)]
+    board = [[FONDO_MAPA for i in range(SIZE_TABLERO)] for j in range(SIZE_TABLERO)]
+    for attack in attacks:
+        if (attack[2] == 1):
+            board[attack[1]][attack[0]] = HUNDIDO_MAPA
+        else:
+            board[attack[1]][attack[0]] = DISPARO_MAPA
+    
+    for row in board:
+        for element in row:
+            print(element, end="\t")
+        print()
+    print()
+    pass
+
+    
+
 
 def __main__():
     pass

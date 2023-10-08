@@ -2,7 +2,7 @@ SIZE_TABLERO = 5
 FONDO_MAPA = "~"
 BARCO_MAPA = "B"
 HUNDIDO_MAPA = "H"
-DISPARO_MAPA = "*"
+DISPARO_MAPA = "X"
 
 SHIPS = ["p","b","s"]
 SHIPS_SIZE = {

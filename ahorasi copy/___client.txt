@@ -9,3 +9,18 @@
              },
     "position": [x,y], # posicion de ataque
   }
+
+
+c
+s
+n
+b
+0
+0
+v
+1
+1
+v
+2
+2
+v
