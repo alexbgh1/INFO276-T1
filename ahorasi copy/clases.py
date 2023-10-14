@@ -61,6 +61,7 @@ class Servidor:
         self.serverSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
         self.tableros = {} # {address: tablero}
         self.usuarios = {}
+        self.turno_actual = None
 
     def bind(self):
         self.serverSocket.bind((self.SERVER_IP, self.PORT))
@@ -78,25 +79,50 @@ class Servidor:
         while (True):
             # Aceptar una nueva conexión
             message, address = self.recibirMSG(); messageJSON = json.loads(message);
+            validResponse = True
             print(message)
+            # === CAMBIAR TURNO ===
+            if (messageJSON["action"] == "t"):
+                # Si solicita turno, no pasamos de turno
+                pass
+            elif (address in self.usuarios and self.usuarios[address].progress == 3 and not self.usuarios[address].againstBot and self.turno_actual == address):
+                # address existe
+                # address está en progreso 3
+                # address no está contra bot
+                # address es el turno actual
+                self.handleChangeTurn(address)
+
+            elif (address in self.usuarios and self.usuarios[address].progress == 3 and not self.usuarios[address].againstBot and self.turno_actual != address):
+                print("No es tu turno.")
+                validResponse = False
 
             # === ACTION ===
-            response = self.handleMessageJSON(messageJSON, address)
+            if (validResponse):
+                response = self.handleMessageJSON(messageJSON, address)
+            else:
+                response = Response(messageJSON["action"], 0, [0,0], "No es tu turno, este ataque no se registró en el Servidor")
+            # === PRINT DATA ===
             if (address in self.usuarios):
                 self.usuarios[address].printUsuario()
                 if (self.usuarios[address].againstBot):
                     self.usuarios[address].bot.printShips()
             print("\nUsuarios activos: ", self.usuarios)
 
+
+
             # === SEND RESPONSE ===
             self.serverSocket.sendto(str.encode(response.toJSON()), address)
 
 
-    def enviar_turno_a_clientes(self):
-        for address in self.usuarios:
-            message = {"action": "turno", "turno_actual": self.turno_actual}
-            self.serverSocket.sendto(json.dumps(message).encode(), address)
-
+    def handleChangeTurn(self, address: tuple):
+        # Change Turn self.turno_actual = address
+        try:
+            enemyAddress = [addr for addr in self.usuarios.keys() if addr != address][0]
+            self.turno_actual = enemyAddress
+        except:
+            self.turno_actual = address
+        pass
+        
     def handleMessageJSON(self, messageJSON: dict, address: tuple):
         # MessageStructure: action, bot, ships, position.
         if (address in self.usuarios): # Validamos que el usuario exista y que la acción sea válida
@@ -117,7 +143,16 @@ class Servidor:
             return self.handleAttack(messageJSON, address) # 3
         if (messageJSON["action"] == "d"):
             return self.handleDisconnection(messageJSON, address)
+        if (messageJSON["action"] == "t"):
+            return self.handleTurn(messageJSON, address)
         return Response(messageJSON["action"], 1, [])
+    
+    def handleTurn(self, messageJSON: dict, address: tuple):
+        # Send turn to the player, 1: Turno, 0: No turno
+        if (address == self.turno_actual):
+            return Response(messageJSON["action"], 1, [], "Es tu turno.")
+        else:
+            return Response(messageJSON["action"], 0, [], "No es tu turno.")
     
     def handleAttack(self, messageJSON: dict, address: tuple):
         # {x, y}
@@ -154,10 +189,10 @@ class Servidor:
                     self.usuarios[address].progress = 1 # CONECTADO
                     return Response("w", 1, [AttackCoords[0], AttackCoords[1]], "Ganaste contra el bot") # Win
                 else:
-                    return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]], "Le diste al bot")
+                    return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]], f"Le diste al bot. Bot atacó en {botAttackCoords[0]},{botAttackCoords[1]}. Bot tiene {self.usuarios[address].bot.lives} vidas restantes.")
             # Attack missed
             else:
-                return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]], " No le diste al bot")
+                return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]], f"No le diste al bot. Bot atacó en {botAttackCoords[0]},{botAttackCoords[1]}")
             
         # Player is against player
         else:
@@ -204,7 +239,6 @@ class Servidor:
                 return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]], "No le diste al jugador")
 
 
-
     def handleBuild(self, messageJSON: dict, address: tuple):
         # {p: [x, y, orientation], b: [x, y, orientation], s: [x, y, orientation]}
         try:
@@ -226,6 +260,7 @@ class Servidor:
 
             self.usuarios[address].shipsAsCoords = shipsToCoords(self.usuarios[address].ships)
             self.usuarios[address].progress = 3
+            self.turno_actual = address
             return Response(messageJSON["action"], 1, [])
         except:
             try:
@@ -303,7 +338,7 @@ class Cliente:
         self.shipsAsCoords = []
     
     def conectarAServidor(self):
-        VALID_ACTION = ["c", "a", "l", "b", "d", "s"]
+        VALID_ACTION = ["c", "a", "l", "b", "d", "s","t"]
         print("\nc: Conectar\na: Atacar\nl: Perder\nb: Construir\nd: Desconectar\ns: Seleccionar\n")
         while(True):
             isValid = False
@@ -370,6 +405,11 @@ class Cliente:
             else:
                 print("Barco no se pudo construir o hubo un error.") # Retrocede un paso
                 self.progress = 2
+
+        if(msgFromServer["action"] == "t"):
+            print("Consultando turno...")
+            return False
+
         if (msgFromServer["action"] == "a"):
             if (msgFromServer["status"]):
                 print("Ataque exitoso.")
@@ -454,6 +494,11 @@ class Cliente:
             else:
                 self.messageToSend = MessageStructure(action, 0, {}, [])
             return True
+        
+        # TURN
+        elif (action == "t"):
+            self.messageToSend = MessageStructure(action, 0, {}, [])
+            return True
 
         # DISCONNECT or LOSE
         elif (action == "d" or action == "l"):
@@ -494,8 +539,8 @@ def validateProgress(progress):
         print("Acciones que puede realizar: b, d")
         return ["b", "d"]
     elif (progress == 3):
-        print("Acciones que puede realizar: a, d")
-        return ["a", "d"]
+        print("Acciones que puede realizar: t, a, d")
+        return ["t","a", "d"]
     return []
 
 def overlapped(list_coords_1, list_coords_2):
