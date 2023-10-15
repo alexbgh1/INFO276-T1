@@ -100,7 +100,10 @@ class Servidor:
             if (validResponse):
                 response = self.handleMessageJSON(messageJSON, address)
             else:
-                response = Response(messageJSON["action"], 0, [0,0], "No es tu turno, este ataque no se registró en el Servidor")
+                if (messageJSON["action"] == "d"):
+                    response = self.handleMessageJSON(messageJSON, address)
+                else:
+                    response = Response("t", 0, [0,0], "No es tu turno, este ataque no se registró en el Servidor")
             # === PRINT DATA ===
             if (address in self.usuarios):
                 self.usuarios[address].printUsuario()
@@ -189,10 +192,10 @@ class Servidor:
                     self.usuarios[address].progress = 1 # CONECTADO
                     return Response("w", 1, [AttackCoords[0], AttackCoords[1]], "Ganaste contra el bot") # Win
                 else:
-                    return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]], f"Le diste al bot. Bot atacó en {botAttackCoords[0]},{botAttackCoords[1]}. Bot tiene {self.usuarios[address].bot.lives} vidas restantes.")
+                    return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]], f"Le diste al bot. Bot atacó en {botAttackCoords[0]},{botAttackCoords[1]}. Tu tienes {self.usuarios[address].lives} vidas. Bot tiene {self.usuarios[address].bot.lives} vidas.")
             # Attack missed
             else:
-                return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]], f"No le diste al bot. Bot atacó en {botAttackCoords[0]},{botAttackCoords[1]}")
+                return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]], f"No le diste al bot. Bot atacó en {botAttackCoords[0]},{botAttackCoords[1]}. Tu tienes {self.usuarios[address].lives} vidas. Bot tiene {self.usuarios[address].bot.lives} vidas.")
             
         # Player is against player
         else:
@@ -216,7 +219,7 @@ class Servidor:
                     user = Usuario({}, {"p":[],"b":[],"s":[]}, [] , 1) # Usuario: {bot: {}, ships: {}, progress: 1}
                     user.lives = 6; user.ships = {"p": [], "b": [], "s": []}; user.shipsAsCoords = [];
                     self.usuarios[address] = user
-                    return Response("l", 1, [AttackCoords[0], AttackCoords[1]]) # Lose
+                    return Response("l", 1, [AttackCoords[0], AttackCoords[1]], "Perdiste contra el otro jugador.") # Lose
 
                 if (self.usuarios[enemyAddress].lives == 0):
                     self.tableros[address] = []
@@ -224,10 +227,10 @@ class Servidor:
                     user.lives = 6; user.ships = {"p": [], "b": [], "s": []}; user.shipsAsCoords = [];
                     self.usuarios[address] = user
 
-                    return Response("w", 1, [AttackCoords[0], AttackCoords[1]], "Ganaste") # Win
+                    return Response("w", 1, [AttackCoords[0], AttackCoords[1]], "Ganaste contra el otro jugador.") # Win
                 # HIT
                 else:
-                    return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]], "Le diste al jugador")
+                    return Response(messageJSON["action"], 1, [AttackCoords[0], AttackCoords[1]], f"Le diste al jugador. Vidas rivales: {self.usuarios[enemyAddress].lives}. Vidas tuyas: {self.usuarios[address].lives}")
             # Attack missed
             else:
                 if (self.usuarios[address].lives == 0):
@@ -236,7 +239,7 @@ class Servidor:
                     self.usuarios[address] = user
                     return Response("l", 1, [AttackCoords[0], AttackCoords[1]], "Perdiste") # Lose
                 
-                return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]], "No le diste al jugador")
+                return Response(messageJSON["action"], 0, [AttackCoords[0], AttackCoords[1]], f"No le diste al jugador. Vidas rivales: {self.usuarios[enemyAddress].lives}. Vidas tuyas: {self.usuarios[address].lives}")
 
 
     def handleBuild(self, messageJSON: dict, address: tuple):
@@ -261,13 +264,14 @@ class Servidor:
             self.usuarios[address].shipsAsCoords = shipsToCoords(self.usuarios[address].ships)
             self.usuarios[address].progress = 3
             self.turno_actual = address
-            return Response(messageJSON["action"], 1, [])
+            self.handleChangeTurn(address) # Change Turn
+            return Response(messageJSON["action"], 1, [], "Barcos construidos correctamente.")
         except:
             try:
                 self.usuarios[address].progress = 2
             except:
-                return Response(messageJSON["action"], 0, [])
-            return Response(messageJSON["action"], 0, [])
+                return Response(messageJSON["action"], 0, [], "Barcos no se pudieron construir.")
+            return Response(messageJSON["action"], 0, [], "Barcos no se pudieron construir.")
 
     def handleSelect(self, messageJSON: dict, address: tuple):
         try:
@@ -278,27 +282,27 @@ class Servidor:
                 self.usuarios[address].againstBot = True
                 self.usuarios[address].progress = 2
                 self.tableros[address] = []
-                return Response(messageJSON["action"], 1, [])
+                return Response(messageJSON["action"], 1, [], "Bot seleccionado.")
             else:
                 self.usuarios[address].bot = {}
                 self.usuarios[address].againstBot = False
                 self.usuarios[address].progress = 2
-                return Response(messageJSON["action"], 1, [])
+                return Response(messageJSON["action"], 1, [], "Bot no seleccionado. Jugador contra jugador.")
         except:
             try:
                 self.usuarios[address].progress = 1
             except:
-                Response(messageJSON["action"], 0, [])
-            return Response(messageJSON["action"], 0, [])
+                Response(messageJSON["action"], 0, [], "Bot no se pudo seleccionar.")
+            return Response(messageJSON["action"], 0, [], "Bot no se pudo seleccionar.")
         
     def handleConnection(self, messageJSON: dict, address: tuple):
         # Hay menos de 2 jugadores
         if (len(self.usuarios) < 2):
             self.usuarios[address] = Usuario({}, {"p":[],"b":[],"s":[]}, [] , 1) # Usuario: {bot: {}, ships: {}, progress: 1}
-            return Response(messageJSON["action"], 1, [])
+            return Response(messageJSON["action"], 1, [], "Conexión exitosa.")
         # Hay 2 jugadores o más
         else:
-            return Response(messageJSON["action"], 0, [])
+            return Response(messageJSON["action"], 0, [], "Servidor lleno.")
         
     def handleDisconnection(self, messageJSON: dict, address: tuple):
         # Si el usuario existe
@@ -309,10 +313,10 @@ class Servidor:
                 except:
                     pass
             del self.usuarios[address]
-            return Response(messageJSON["action"], 1, [])
+            return Response(messageJSON["action"], 1, [], "Desconexión exitosa.")
         # Si el usuario no existe
         else:
-            return Response(messageJSON["action"], 0, [])
+            return Response(messageJSON["action"], 0, [], "Desconexión no se pudo realizar.")
 
 # ===========================================================================
 
