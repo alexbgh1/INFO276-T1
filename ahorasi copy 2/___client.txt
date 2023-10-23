@@ -1,0 +1,26 @@
+{
+    "action": "c, a, l, b, d, s", # connection, attack, lose, build, disconnect, select
+    "bot": 0, # 0 o 1, 1: partida vs bot, 0: partida vs otro cliente
+
+    "ships": {
+              "p": [x,y,0], # cordenada (x,y) y orientación (0: vertical, 1: horizontal)
+              "b": [x,y,0],
+              "s": [x,y,0]
+             },
+    "position": [x,y], # posicion de ataque
+  }
+
+
+c
+s
+n
+b
+0
+0
+v
+1
+1
+v
+2
+2
+v
